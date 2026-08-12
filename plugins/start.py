@@ -1,6 +1,7 @@
 #(©)CodeXBotz
 
 import os
+import html
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
@@ -10,16 +11,22 @@ from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
 from bot import Bot
 from config import ADMINS, FORCE_MSG, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, JOIN_REQUEST_ENABLE, FORCE_SUB_CHANNEL, UNAUTHORIZED_TEXT
 from helper_func import subscribed, decode, get_messages, delete_file
-from database.database import add_user, del_user, full_userbase, present_user, present_special_user, add_special_user, del_special_user, full_special_userbase
+from database.database import add_user, del_user, full_userbase, present_user, get_user, present_special_user, add_special_user, del_special_user, full_special_userbase, get_special_user
 
 
 @Bot.on_message(filters.command('start') & filters.private & subscribed)
 async def start_command(client: Client, message: Message):
     id = message.from_user.id
-    if not await present_user(id):
+    name = f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}".strip() or None
+    username = message.from_user.username
+    try:
+        await add_user(id, name=name, username=username)
+    except Exception:
+        pass
+    if await present_special_user(id):
         try:
-            await add_user(id)
-        except:
+            await add_special_user(id, name=name, username=username)
+        except Exception:
             pass
     text = message.text
     if len(text)>7:
@@ -170,6 +177,13 @@ REPLY_ERROR = """<code>Use this command as a replay to any telegram message with
 
 @Bot.on_message(filters.command('start') & filters.private)
 async def not_joined(client: Client, message: Message):
+    id = message.from_user.id
+    name = f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}".strip() or None
+    username = message.from_user.username
+    try:
+        await add_user(id, name=name, username=username)
+    except Exception:
+        pass
 
     if bool(JOIN_REQUEST_ENABLE):
         invite = await client.create_chat_invite_link(
@@ -269,11 +283,17 @@ Unsuccessful: <code>{unsuccessful}</code></b>"""
 @Bot.on_message(filters.command('add') & filters.private & filters.user(ADMINS))
 async def add_special_user_handler(client: Bot, message: Message):
     user_ids = []
+    user_info_map = {}
+
     if message.reply_to_message:
-        if message.reply_to_message.from_user:
-            user_ids.append(message.reply_to_message.from_user.id)
-        elif message.reply_to_message.forward_from:
-            user_ids.append(message.reply_to_message.forward_from.id)
+        target_user = message.reply_to_message.from_user or message.reply_to_message.forward_from
+        if target_user:
+            user_ids.append(target_user.id)
+            full_name = f"{target_user.first_name or ''} {target_user.last_name or ''}".strip() or None
+            user_info_map[target_user.id] = {
+                'name': full_name,
+                'username': target_user.username
+            }
 
     if len(message.command) > 1:
         for arg in message.command[1:]:
@@ -300,19 +320,45 @@ async def add_special_user_handler(client: Bot, message: Message):
 
     for u_id in user_ids:
         try:
-            if await present_special_user(u_id):
-                already_present.append(str(u_id))
+            name = None
+            username = None
+            if u_id in user_info_map:
+                name = user_info_map[u_id].get('name')
+                username = user_info_map[u_id].get('username')
             else:
-                await add_special_user(u_id)
-                added.append(str(u_id))
+                try:
+                    u_obj = await client.get_users(u_id)
+                    if u_obj:
+                        name = f"{u_obj.first_name or ''} {u_obj.last_name or ''}".strip() or None
+                        username = u_obj.username
+                except Exception:
+                    pass
+
+            if not name:
+                doc = await get_special_user(u_id) or await get_user(u_id)
+                if doc:
+                    name = doc.get('name')
+                    if not username:
+                        username = doc.get('username')
+
+            uname_str = f" (@{username})" if username else ""
+            display = f"<a href='tg://user?id={u_id}'>{html.escape(name)}</a>{uname_str} (<code>{u_id}</code>)" if name else f"<code>{u_id}</code>"
+
+            if await present_special_user(u_id):
+                if name or username:
+                    await add_special_user(u_id, name=name, username=username)
+                already_present.append(display)
+            else:
+                await add_special_user(u_id, name=name, username=username)
+                added.append(display)
         except Exception as e:
             failed.append(f"{u_id} ({e})")
 
     res = []
     if added:
-        res.append(f"✅ <b>Added to special users:</b>\n" + ", ".join([f"<code>{i}</code>" for i in added]))
+        res.append(f"✅ <b>Added to special users:</b>\n" + "\n".join([f"• {i}" for i in added]))
     if already_present:
-        res.append(f"ℹ️ <b>Already in special users:</b>\n" + ", ".join([f"<code>{i}</code>" for i in already_present]))
+        res.append(f"ℹ️ <b>Already in special users:</b>\n" + "\n".join([f"• {i}" for i in already_present]))
     if failed:
         res.append(f"❌ <b>Failed:</b>\n" + ", ".join(failed))
 
@@ -323,10 +369,9 @@ async def add_special_user_handler(client: Bot, message: Message):
 async def remove_special_user_handler(client: Bot, message: Message):
     user_ids = []
     if message.reply_to_message:
-        if message.reply_to_message.from_user:
-            user_ids.append(message.reply_to_message.from_user.id)
-        elif message.reply_to_message.forward_from:
-            user_ids.append(message.reply_to_message.forward_from.id)
+        target_user = message.reply_to_message.from_user or message.reply_to_message.forward_from
+        if target_user:
+            user_ids.append(target_user.id)
 
     if len(message.command) > 1:
         for arg in message.command[1:]:
@@ -354,18 +399,32 @@ async def remove_special_user_handler(client: Bot, message: Message):
     for u_id in user_ids:
         try:
             if await present_special_user(u_id):
+                doc = await get_special_user(u_id) or await get_user(u_id)
+                name = doc.get('name') if doc else None
+                username = doc.get('username') if doc else None
+                if not name:
+                    try:
+                        u_obj = await client.get_users(u_id)
+                        if u_obj:
+                            name = f"{u_obj.first_name or ''} {u_obj.last_name or ''}".strip() or None
+                            username = u_obj.username
+                    except Exception:
+                        pass
+
                 await del_special_user(u_id)
-                removed.append(str(u_id))
+                uname_str = f" (@{username})" if username else ""
+                display = f"<a href='tg://user?id={u_id}'>{html.escape(name)}</a>{uname_str} (<code>{u_id}</code>)" if name else f"<code>{u_id}</code>"
+                removed.append(display)
             else:
-                not_found.append(str(u_id))
+                not_found.append(f"<code>{u_id}</code>")
         except Exception as e:
             failed.append(f"{u_id} ({e})")
 
     res = []
     if removed:
-        res.append(f"✅ <b>Removed from special users:</b>\n" + ", ".join([f"<code>{i}</code>" for i in removed]))
+        res.append(f"✅ <b>Removed from special users:</b>\n" + "\n".join([f"• {i}" for i in removed]))
     if not_found:
-        res.append(f"❌ <b>Not found in special users:</b>\n" + ", ".join([f"<code>{i}</code>" for i in not_found]))
+        res.append(f"❌ <b>Not found in special users:</b>\n" + ", ".join([f"• {i}" for i in not_found]))
     if failed:
         res.append(f"⚠️ <b>Failed:</b>\n" + ", ".join(failed))
 
@@ -379,21 +438,71 @@ async def list_special_users_command(client: Bot, message: Message):
         await message.reply_text("ℹ️ No special users found in the database.", quote=True)
         return
 
-    user_list_str = "\n".join([f"• <code>{uid}</code>" for uid in users])
-    text = f"<b>Total Special Users:</b> <code>{len(users)}</code>\n\n<b>User IDs:</b>\n{user_list_str}"
+    wait_msg = await message.reply_text("<i>Fetching special users list...</i>", quote=True)
+
+    formatted_users = []
+    plain_users = []
+
+    for idx, uid in enumerate(users, start=1):
+        name = None
+        username = None
+
+        # 1. Try to fetch directly from Telegram client
+        try:
+            user_obj = await client.get_users(uid)
+            if user_obj:
+                full_name = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
+                if full_name:
+                    name = full_name
+                username = user_obj.username
+                try:
+                    await add_special_user(uid, name=name, username=username)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # 2. Fallback to database if client.get_users failed
+        if not name:
+            try:
+                doc = await get_special_user(uid) or await get_user(uid)
+                if doc:
+                    name = doc.get('name')
+                    if not username:
+                        username = doc.get('username')
+            except Exception:
+                pass
+
+        # 3. Format lines
+        if name:
+            escaped_name = html.escape(name)
+            uname_str = f" (@{username})" if username else ""
+            html_line = f"• <a href='tg://user?id={uid}'>{escaped_name}</a>{uname_str} - <code>{uid}</code>"
+            plain_line = f"{idx}. {name}{uname_str} - ID: {uid}"
+        else:
+            uname_str = f" (@{username})" if username else ""
+            html_line = f"• <i>Hidden / Unavailable</i>{uname_str} - <code>{uid}</code>"
+            plain_line = f"{idx}. ID: {uid} (Name Unavailable){uname_str}"
+
+        formatted_users.append(html_line)
+        plain_users.append(plain_line)
+
+    user_list_str = "\n".join(formatted_users)
+    text = f"<b>Total Special Users:</b> <code>{len(users)}</code>\n\n<b>Special Users:</b>\n{user_list_str}"
 
     if len(text) > 4000:
         file_name = "special_users.txt"
-        with open(file_name, "w") as f:
-            f.write("\n".join(str(uid) for uid in users))
+        with open(file_name, "w", encoding="utf-8") as f:
+            f.write(f"Total Special Users: {len(users)}\n\n" + "\n".join(plain_users))
         await message.reply_document(
             document=file_name,
             caption=f"<b>Total Special Users:</b> <code>{len(users)}</code>",
             quote=True
         )
+        await wait_msg.delete()
         if os.path.exists(file_name):
             os.remove(file_name)
     else:
-        await message.reply_text(text, quote=True)
+        await wait_msg.edit_text(text, disable_web_page_preview=True)
 
 
