@@ -8,9 +8,9 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
 
 from bot import Bot
-from config import ADMINS, FORCE_MSG, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, JOIN_REQUEST_ENABLE,FORCE_SUB_CHANNEL
-from helper_func import subscribed,decode, get_messages, delete_file
-from database.database import add_user, del_user, full_userbase, present_user
+from config import ADMINS, FORCE_MSG, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, JOIN_REQUEST_ENABLE, FORCE_SUB_CHANNEL, UNAUTHORIZED_TEXT
+from helper_func import subscribed, decode, get_messages, delete_file
+from database.database import add_user, del_user, full_userbase, present_user, present_special_user, add_special_user, del_special_user, full_special_userbase
 
 
 @Bot.on_message(filters.command('start') & filters.private & subscribed)
@@ -23,6 +23,13 @@ async def start_command(client: Client, message: Message):
             pass
     text = message.text
     if len(text)>7:
+        if not (id in ADMINS or await present_special_user(id)):
+            await message.reply_text(
+                UNAUTHORIZED_TEXT,
+                quote=True,
+                disable_web_page_preview=True
+            )
+            return
         try:
             base64_string = text.split(" ", 1)[1]
         except:
@@ -257,4 +264,136 @@ Unsuccessful: <code>{unsuccessful}</code></b>"""
         msg = await message.reply(REPLY_ERROR)
         await asyncio.sleep(8)
         await msg.delete()
+
+
+@Bot.on_message(filters.command('add') & filters.private & filters.user(ADMINS))
+async def add_special_user_handler(client: Bot, message: Message):
+    user_ids = []
+    if message.reply_to_message:
+        if message.reply_to_message.from_user:
+            user_ids.append(message.reply_to_message.from_user.id)
+        elif message.reply_to_message.forward_from:
+            user_ids.append(message.reply_to_message.forward_from.id)
+
+    if len(message.command) > 1:
+        for arg in message.command[1:]:
+            try:
+                user_ids.append(int(arg))
+            except ValueError:
+                await message.reply_text(f"❌ Invalid user ID: <code>{arg}</code>. User ID must be an integer.", quote=True)
+                return
+
+    if not user_ids:
+        msg_text = (
+            "<b>Usage:</b>\n"
+            "• <code>/add [user_id]</code> - Add user to special users list\n"
+            "• <code>/add [id1] [id2] ...</code> - Add multiple users\n"
+            "• Reply to a user's message with <code>/add</code>"
+        )
+        await message.reply_text(msg_text, quote=True)
+        return
+
+    user_ids = list(dict.fromkeys(user_ids))
+    added = []
+    already_present = []
+    failed = []
+
+    for u_id in user_ids:
+        try:
+            if await present_special_user(u_id):
+                already_present.append(str(u_id))
+            else:
+                await add_special_user(u_id)
+                added.append(str(u_id))
+        except Exception as e:
+            failed.append(f"{u_id} ({e})")
+
+    res = []
+    if added:
+        res.append(f"✅ <b>Added to special users:</b>\n" + ", ".join([f"<code>{i}</code>" for i in added]))
+    if already_present:
+        res.append(f"ℹ️ <b>Already in special users:</b>\n" + ", ".join([f"<code>{i}</code>" for i in already_present]))
+    if failed:
+        res.append(f"❌ <b>Failed:</b>\n" + ", ".join(failed))
+
+    await message.reply_text("\n\n".join(res), quote=True)
+
+
+@Bot.on_message(filters.command('remove') & filters.private & filters.user(ADMINS))
+async def remove_special_user_handler(client: Bot, message: Message):
+    user_ids = []
+    if message.reply_to_message:
+        if message.reply_to_message.from_user:
+            user_ids.append(message.reply_to_message.from_user.id)
+        elif message.reply_to_message.forward_from:
+            user_ids.append(message.reply_to_message.forward_from.id)
+
+    if len(message.command) > 1:
+        for arg in message.command[1:]:
+            try:
+                user_ids.append(int(arg))
+            except ValueError:
+                await message.reply_text(f"❌ Invalid user ID: <code>{arg}</code>. User ID must be an integer.", quote=True)
+                return
+
+    if not user_ids:
+        msg_text = (
+            "<b>Usage:</b>\n"
+            "• <code>/remove [user_id]</code> - Remove user from special users list\n"
+            "• <code>/remove [id1] [id2] ...</code> - Remove multiple users\n"
+            "• Reply to a user's message with <code>/remove</code>"
+        )
+        await message.reply_text(msg_text, quote=True)
+        return
+
+    user_ids = list(dict.fromkeys(user_ids))
+    removed = []
+    not_found = []
+    failed = []
+
+    for u_id in user_ids:
+        try:
+            if await present_special_user(u_id):
+                await del_special_user(u_id)
+                removed.append(str(u_id))
+            else:
+                not_found.append(str(u_id))
+        except Exception as e:
+            failed.append(f"{u_id} ({e})")
+
+    res = []
+    if removed:
+        res.append(f"✅ <b>Removed from special users:</b>\n" + ", ".join([f"<code>{i}</code>" for i in removed]))
+    if not_found:
+        res.append(f"❌ <b>Not found in special users:</b>\n" + ", ".join([f"<code>{i}</code>" for i in not_found]))
+    if failed:
+        res.append(f"⚠️ <b>Failed:</b>\n" + ", ".join(failed))
+
+    await message.reply_text("\n\n".join(res), quote=True)
+
+
+@Bot.on_message(filters.command(['special_users', 'specialusers', 'special']) & filters.private & filters.user(ADMINS))
+async def list_special_users_command(client: Bot, message: Message):
+    users = await full_special_userbase()
+    if not users:
+        await message.reply_text("ℹ️ No special users found in the database.", quote=True)
+        return
+
+    user_list_str = "\n".join([f"• <code>{uid}</code>" for uid in users])
+    text = f"<b>Total Special Users:</b> <code>{len(users)}</code>\n\n<b>User IDs:</b>\n{user_list_str}"
+
+    if len(text) > 4000:
+        file_name = "special_users.txt"
+        with open(file_name, "w") as f:
+            f.write("\n".join(str(uid) for uid in users))
+        await message.reply_document(
+            document=file_name,
+            caption=f"<b>Total Special Users:</b> <code>{len(users)}</code>",
+            quote=True
+        )
+        if os.path.exists(file_name):
+            os.remove(file_name)
+    else:
+        await message.reply_text(text, quote=True)
+
 

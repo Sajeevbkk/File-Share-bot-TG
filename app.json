@@ -74,6 +74,11 @@
     "AUTO_DEL_SUCCESS_MSG": {
       "description": "The custom message shown to the user once the file is successfully deleted.",
       "value": "Your file has been successfully deleted. Thank you for using our service. ✅"
+    },
+    "UNAUTHORIZED_TEXT": {
+      "description": "Custom message shown when an unauthorized user attempts to access files",
+      "value": "<b>❌ Access Denied!</b>\n\nYou are not authorized to access files from this bot. Please contact an admin.",
+      "required": false
     }
   },
   "buildpacks": [

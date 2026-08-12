@@ -96,6 +96,12 @@ python3 main.py
 
 /genlink - create link for one post
 
+/add - add user(s) to special users list who can access files
+
+/remove - remove user(s) from special users list
+
+/special_users - view list of all authorized special users
+
 /users - view bot statistics
 
 /broadcast - broadcast any messages to bot users
@@ -122,6 +128,7 @@ python3 main.py
 
 ### Extra Variables
 
+* `UNAUTHORIZED_TEXT` Custom message shown when an unauthorized user attempts to access files
 * `AUTO_DELETE_MSG` put your custom deletion text if you want Setup Custom deletion messaeg,
 * `AUTO_DEL_SUCCESS_MSG` Set your custom success message for when the file is successfully deleted
 * `CUSTOM_CAPTION` put your Custom caption text if you want Setup Custom Caption, you can use HTML and <a href='https://github.com/CodeXBotz/File-Sharing-Bot/blob/main/README.md#custom_caption'>fillings</a> for formatting (only for documents)
