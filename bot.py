@@ -4,7 +4,7 @@ from aiohttp import web
 from plugins import web_server
 
 import pyromod.listen
-from pyrogram import Client
+from pyrogram import Client, raw, utils
 from pyrogram.enums import ParseMode
 import sys
 from datetime import datetime
@@ -42,6 +42,13 @@ class Bot(Client):
 
         if FORCE_SUB_CHANNEL:
             try:
+                try:
+                    f_id = utils.get_channel_id(FORCE_SUB_CHANNEL)
+                    f_res = await self.invoke(raw.functions.channels.GetChannels(id=[raw.types.InputChannel(channel_id=f_id, access_hash=0)]))
+                    if f_res and hasattr(f_res, "chats"):
+                        await self.fetch_peers(f_res.chats)
+                except Exception:
+                    pass
                 link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
                 if not link:
                     await self.export_chat_invite_link(FORCE_SUB_CHANNEL)
@@ -54,6 +61,13 @@ class Bot(Client):
                 self.LOGGER(__name__).info("\nBot Stopped. Join https://t.me/CodeXBotzSupport for support")
                 sys.exit()
         try:
+            try:
+                ch_id = utils.get_channel_id(CHANNEL_ID)
+                res = await self.invoke(raw.functions.channels.GetChannels(id=[raw.types.InputChannel(channel_id=ch_id, access_hash=0)]))
+                if res and hasattr(res, "chats"):
+                    await self.fetch_peers(res.chats)
+            except Exception:
+                pass
             db_channel = await self.get_chat(CHANNEL_ID)
             self.db_channel = db_channel
             test = await self.send_message(chat_id = db_channel.id, text = "Test Message")
@@ -66,8 +80,11 @@ class Bot(Client):
 
         self.set_parse_mode(ParseMode.HTML)
         self.LOGGER(__name__).info(f"Bot Running..!\n\nCreated by \nhttps://t.me/CodeXBotz")
-        print(ascii_art)
-        print("""Welcome to CodeXBotz File Sharing Bot""")
+        try:
+            print(ascii_art)
+        except UnicodeEncodeError:
+            pass
+        print("Welcome to CodeXBotz File Sharing Bot")
         self.username = usr_bot_me.username
         #web-response
         app = web.AppRunner(await web_server())
