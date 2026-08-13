@@ -50,15 +50,23 @@ async def get_messages(client, message_ids):
                 message_ids=temb_ids
             )
         except FloodWait as e:
-            await asyncio.sleep(e.x)
-            msgs = await client.get_messages(
-                chat_id=client.db_channel.id,
-                message_ids=temb_ids
-            )
-        except:
-            pass
+            wait_time = getattr(e, 'value', getattr(e, 'x', 1))
+            await asyncio.sleep(wait_time)
+            try:
+                msgs = await client.get_messages(
+                    chat_id=client.db_channel.id,
+                    message_ids=temb_ids
+                )
+            except Exception:
+                msgs = []
+        except Exception:
+            msgs = []
         total_messages += len(temb_ids)
-        messages.extend(msgs)
+        if msgs:
+            if isinstance(msgs, list):
+                messages.extend(msgs)
+            else:
+                messages.append(msgs)
     return messages
 
 async def get_message_id(client, message):
@@ -109,13 +117,24 @@ def get_readable_time(seconds: int) -> str:
 async def delete_file(messages, client, process):
     await asyncio.sleep(AUTO_DELETE_TIME)
     for msg in messages:
+        if not msg:
+            continue
         try:
             await client.delete_messages(chat_id=msg.chat.id, message_ids=[msg.id])
+        except FloodWait as e:
+            wait_time = getattr(e, 'value', getattr(e, 'x', 1))
+            await asyncio.sleep(wait_time)
+            try:
+                await client.delete_messages(chat_id=msg.chat.id, message_ids=[msg.id])
+            except Exception:
+                pass
         except Exception as e:
-            await asyncio.sleep(e.x)
-            print(f"The attempt to delete the media {msg.id} was unsuccessful: {e}")
+            print(f"The attempt to delete the media {getattr(msg, 'id', 'unknown')} was unsuccessful: {e}")
 
-    await process.edit_text(AUTO_DEL_SUCCESS_MSG)
+    try:
+        await process.edit_text(AUTO_DEL_SUCCESS_MSG)
+    except Exception:
+        pass
 
 
 subscribed = filters.create(is_subscribed)

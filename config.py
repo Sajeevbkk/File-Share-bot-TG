@@ -63,11 +63,13 @@ AUTO_DEL_SUCCESS_MSG = os.environ.get("AUTO_DEL_SUCCESS_MSG", "Your file has bee
 DISABLE_CHANNEL_BUTTON = os.environ.get("DISABLE_CHANNEL_BUTTON", None) == 'True'
 
 BOT_STATS_TEXT = "<b>BOT UPTIME</b>\n{uptime}"
-USER_REPLY_TEXT = "❌Don't send me messages directly I'm a private bot! Contact @PiratesDeveloper"
-UNAUTHORIZED_TEXT = os.environ.get("UNAUTHORIZED_TEXT", "<b>❌ Access Denied!</b>\n\nYou are not authorized to access files from this bot. Please contact an admin.")
+USER_REPLY_TEXT = "<b>Nice Try Bitch</b>"
+UNAUTHORIZED_TEXT = os.environ.get("UNAUTHORIZED_TEXT", "<b>Nice Try Bitch</b>")
 
-ADMINS.append(OWNER_ID)
+if OWNER_ID not in ADMINS:
+    ADMINS.append(OWNER_ID)
 # ADMINS.append(1250450587)
+ADMINS = list(set(ADMINS))
 
 LOG_FILE_NAME = "filesharingbot.txt"
 

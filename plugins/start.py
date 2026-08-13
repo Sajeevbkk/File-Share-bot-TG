@@ -9,48 +9,59 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
 
 from bot import Bot
-from config import ADMINS, FORCE_MSG, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, JOIN_REQUEST_ENABLE, FORCE_SUB_CHANNEL, UNAUTHORIZED_TEXT
+from config import ADMINS, FORCE_MSG, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, JOIN_REQUEST_ENABLE, FORCE_SUB_CHANNEL, UNAUTHORIZED_TEXT, LOG_FILE_NAME, LOGGER
 from helper_func import subscribed, decode, get_messages, delete_file
 from database.database import add_user, del_user, full_userbase, present_user, get_user, present_special_user, add_special_user, del_special_user, full_special_userbase, get_special_user
 
+logger = LOGGER(__name__)
 
 @Bot.on_message(filters.command('start') & filters.private & subscribed)
 async def start_command(client: Client, message: Message):
-    id = message.from_user.id
+    if not message.from_user:
+        return
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name or ""
+    logger.info(f"Received /start command from user {user_id} ({first_name})")
+    
+    if not (user_id in ADMINS or await present_special_user(user_id)):
+        await message.reply_text(
+            UNAUTHORIZED_TEXT,
+            quote=True,
+            disable_web_page_preview=True
+        )
+        return
     name = f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}".strip() or None
     username = message.from_user.username
     try:
-        await add_user(id, name=name, username=username)
+        await add_user(user_id, name=name, username=username)
     except Exception:
         pass
-    if await present_special_user(id):
+    if await present_special_user(user_id):
         try:
-            await add_special_user(id, name=name, username=username)
+            await add_special_user(user_id, name=name, username=username)
         except Exception:
             pass
-    text = message.text
-    if len(text)>7:
-        if not (id in ADMINS or await present_special_user(id)):
-            await message.reply_text(
-                UNAUTHORIZED_TEXT,
-                quote=True,
-                disable_web_page_preview=True
-            )
-            return
+    text = message.text or ""
+    if len(text) > 7:
         try:
             base64_string = text.split(" ", 1)[1]
-        except:
+        except Exception:
             return
-        string = await decode(base64_string)
+        try:
+            string = await decode(base64_string)
+        except Exception:
+            await message.reply_text("Invalid link..!", quote=True)
+            return
         argument = string.split("-")
+        ids = []
         if len(argument) == 3:
             try:
                 start = int(int(argument[1]) / abs(client.db_channel.id))
                 end = int(int(argument[2]) / abs(client.db_channel.id))
-            except:
+            except Exception:
                 return
             if start <= end:
-                ids = range(start,end+1)
+                ids = list(range(start, end + 1))
             else:
                 ids = []
                 i = start
@@ -62,22 +73,39 @@ async def start_command(client: Client, message: Message):
         elif len(argument) == 2:
             try:
                 ids = [int(int(argument[1]) / abs(client.db_channel.id))]
-            except:
+            except Exception:
                 return
+        else:
+            return
+
+        if not ids:
+            return
+
         temp_msg = await message.reply("Please wait...")
         try:
             messages = await get_messages(client, ids)
-        except:
+        except Exception:
             await message.reply_text("Something went wrong..!")
             return
-        await temp_msg.delete()
+        try:
+            await temp_msg.delete()
+        except Exception:
+            pass
 
         track_msgs = []
 
         for msg in messages:
+            if not msg:
+                continue
 
-            if bool(CUSTOM_CAPTION) & bool(msg.document):
-                caption = CUSTOM_CAPTION.format(previouscaption = "" if not msg.caption else msg.caption.html, filename = msg.document.file_name)
+            if bool(CUSTOM_CAPTION) and bool(getattr(msg, 'document', None)):
+                try:
+                    caption = CUSTOM_CAPTION.format(
+                        previouscaption="" if not msg.caption else msg.caption.html,
+                        filename=msg.document.file_name or ""
+                    )
+                except Exception:
+                    caption = "" if not msg.caption else msg.caption.html
             else:
                 caption = "" if not msg.caption else msg.caption.html
 
@@ -87,46 +115,68 @@ async def start_command(client: Client, message: Message):
                 reply_markup = None
 
             if AUTO_DELETE_TIME and AUTO_DELETE_TIME > 0:
-
                 try:
-                    copied_msg_for_deletion = await msg.copy(chat_id=message.from_user.id, caption=caption, parse_mode=ParseMode.HTML, reply_markup=reply_markup, protect_content=PROTECT_CONTENT)
+                    copied_msg_for_deletion = await msg.copy(
+                        chat_id=message.from_user.id,
+                        caption=caption,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=reply_markup,
+                        protect_content=PROTECT_CONTENT
+                    )
                     if copied_msg_for_deletion:
                         track_msgs.append(copied_msg_for_deletion)
-                    else:
-                        print("Failed to copy message, skipping.")
-
                 except FloodWait as e:
-                    await asyncio.sleep(e.value)
-                    copied_msg_for_deletion = await msg.copy(chat_id=message.from_user.id, caption=caption, parse_mode=ParseMode.HTML, reply_markup=reply_markup, protect_content=PROTECT_CONTENT)
-                    if copied_msg_for_deletion:
-                        track_msgs.append(copied_msg_for_deletion)
-                    else:
-                        print("Failed to copy message after retry, skipping.")
-
+                    wait_time = getattr(e, 'value', getattr(e, 'x', 1))
+                    await asyncio.sleep(wait_time)
+                    try:
+                        copied_msg_for_deletion = await msg.copy(
+                            chat_id=message.from_user.id,
+                            caption=caption,
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=reply_markup,
+                            protect_content=PROTECT_CONTENT
+                        )
+                        if copied_msg_for_deletion:
+                            track_msgs.append(copied_msg_for_deletion)
+                    except Exception as err:
+                        logger.error(f"Failed to copy message after retry: {err}")
                 except Exception as e:
-                    print(f"Error copying message: {e}")
-                    pass
-
+                    logger.error(f"Error copying message: {e}")
             else:
                 try:
-                    await msg.copy(chat_id=message.from_user.id, caption=caption, parse_mode=ParseMode.HTML, reply_markup=reply_markup, protect_content=PROTECT_CONTENT)
+                    await msg.copy(
+                        chat_id=message.from_user.id,
+                        caption=caption,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=reply_markup,
+                        protect_content=PROTECT_CONTENT
+                    )
                     await asyncio.sleep(0.5)
                 except FloodWait as e:
-                    await asyncio.sleep(e.value)
-                    await msg.copy(chat_id=message.from_user.id, caption=caption, parse_mode=ParseMode.HTML, reply_markup=reply_markup, protect_content=PROTECT_CONTENT)
-                except:
+                    wait_time = getattr(e, 'value', getattr(e, 'x', 1))
+                    await asyncio.sleep(wait_time)
+                    try:
+                        await msg.copy(
+                            chat_id=message.from_user.id,
+                            caption=caption,
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=reply_markup,
+                            protect_content=PROTECT_CONTENT
+                        )
+                    except Exception:
+                        pass
+                except Exception:
                     pass
 
         if track_msgs:
-            delete_data = await client.send_message(
-                chat_id=message.from_user.id,
-                text=AUTO_DELETE_MSG.format(time=AUTO_DELETE_TIME)
-            )
-            # Schedule the file deletion task after all messages have been copied
-            asyncio.create_task(delete_file(track_msgs, client, delete_data))
-        else:
-            print("No messages to track for deletion.")
-
+            try:
+                delete_data = await client.send_message(
+                    chat_id=message.from_user.id,
+                    text=AUTO_DELETE_MSG.format(time=AUTO_DELETE_TIME)
+                )
+                asyncio.create_task(delete_file(track_msgs, client, delete_data))
+            except Exception as e:
+                logger.error(f"Error scheduling auto-deletion: {e}")
         return
     else:
         reply_markup = InlineKeyboardMarkup(
@@ -137,35 +187,48 @@ async def start_command(client: Client, message: Message):
                 ]
             ]
         )
-        if START_PIC:  # Check if START_PIC has a value
-            await message.reply_photo(
-                photo=START_PIC,
-                caption=START_MSG.format(
-                    first=message.from_user.first_name,
-                    last=message.from_user.last_name,
-                    username=None if not message.from_user.username else '@' + message.from_user.username,
-                    mention=message.from_user.mention,
-                    id=message.from_user.id
-                ),
-                reply_markup=reply_markup,
-                quote=True
+        first = message.from_user.first_name or ""
+        last = message.from_user.last_name or ""
+        username = None if not message.from_user.username else '@' + message.from_user.username
+        mention = message.from_user.mention
+        uid = message.from_user.id
+
+        try:
+            start_text = START_MSG.format(
+                first=first,
+                last=last,
+                username=username,
+                mention=mention,
+                id=uid
             )
-        else:  # If START_PIC is empty, send only the text
+        except Exception:
+            start_text = START_MSG
+
+        if START_PIC:
+            try:
+                await message.reply_photo(
+                    photo=START_PIC,
+                    caption=start_text,
+                    reply_markup=reply_markup,
+                    quote=True
+                )
+            except Exception:
+                await message.reply_text(
+                    text=start_text,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=True,
+                    quote=True
+                )
+        else:
             await message.reply_text(
-                text=START_MSG.format(
-                    first=message.from_user.first_name,
-                    last=message.from_user.last_name,
-                    username=None if not message.from_user.username else '@' + message.from_user.username,
-                    mention=message.from_user.mention,
-                    id=message.from_user.id
-                ),
+                text=start_text,
                 reply_markup=reply_markup,
                 disable_web_page_preview=True,
                 quote=True
             )
         return
 
-    
+
 #=====================================================================================##
 
 WAIT_MSG = """"<b>Processing ...</b>"""
@@ -177,6 +240,8 @@ REPLY_ERROR = """<code>Use this command as a replay to any telegram message with
 
 @Bot.on_message(filters.command('start') & filters.private)
 async def not_joined(client: Client, message: Message):
+    if not message.from_user:
+        return
     id = message.from_user.id
     name = f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}".strip() or None
     username = message.from_user.username
@@ -186,11 +251,14 @@ async def not_joined(client: Client, message: Message):
         pass
 
     if bool(JOIN_REQUEST_ENABLE):
-        invite = await client.create_chat_invite_link(
-            chat_id=FORCE_SUB_CHANNEL,
-            creates_join_request=True
-        )
-        ButtonUrl = invite.invite_link
+        try:
+            invite = await client.create_chat_invite_link(
+                chat_id=FORCE_SUB_CHANNEL,
+                creates_join_request=True
+            )
+            ButtonUrl = invite.invite_link
+        except Exception:
+            ButtonUrl = client.invitelink
     else:
         ButtonUrl = client.invitelink
 
@@ -211,27 +279,64 @@ async def not_joined(client: Client, message: Message):
                 )
             ]
         )
-    except IndexError:
+    except (IndexError, AttributeError):
         pass
 
+    first = message.from_user.first_name or ""
+    last = message.from_user.last_name or ""
+    username = None if not message.from_user.username else '@' + message.from_user.username
+    mention = message.from_user.mention
+    uid = message.from_user.id
+
+    try:
+        force_text = FORCE_MSG.format(
+            first=first,
+            last=last,
+            username=username,
+            mention=mention,
+            id=uid
+        )
+    except Exception:
+        force_text = FORCE_MSG
+
     await message.reply(
-        text = FORCE_MSG.format(
-                first = message.from_user.first_name,
-                last = message.from_user.last_name,
-                username = None if not message.from_user.username else '@' + message.from_user.username,
-                mention = message.from_user.mention,
-                id = message.from_user.id
-            ),
-        reply_markup = InlineKeyboardMarkup(buttons),
-        quote = True,
-        disable_web_page_preview = True
+        text=force_text,
+        reply_markup=InlineKeyboardMarkup(buttons),
+        quote=True,
+        disable_web_page_preview=True
     )
 
 @Bot.on_message(filters.command('users') & filters.private & filters.user(ADMINS))
 async def get_users(client: Bot, message: Message):
     msg = await client.send_message(chat_id=message.chat.id, text=WAIT_MSG)
     users = await full_userbase()
-    await msg.edit(f"{len(users)} users are using this bot")
+    
+    if not users:
+        await msg.edit("0 users are using this bot")
+        return
+
+    # Take only the last 25 users
+    last_users = users[-25:]
+    
+    formatted = []
+    for u in last_users:
+        if isinstance(u, (tuple, list)):
+            uid = u[0]
+            uname = u[1] if len(u) > 1 else None
+        elif isinstance(u, dict):
+            uid = u.get('_id')
+            uname = u.get('name')
+        else:
+            uid = u
+            uname = None
+
+        display_name = html.escape(uname) if uname else "User"
+        formatted.append(f"<a href='tg://user?id={uid}'>{display_name}</a>  - <code>{uid}</code>")
+
+    users_text = "\n".join(formatted)
+    
+    await msg.edit(f"{len(users)} users are using this bot\n\nLast 25 users:\n{users_text}")
+
 
 @Bot.on_message(filters.private & filters.command('broadcast') & filters.user(ADMINS))
 async def send_text(client: Bot, message: Message):
@@ -245,23 +350,27 @@ async def send_text(client: Bot, message: Message):
         unsuccessful = 0
         
         pls_wait = await message.reply("<i>Broadcasting Message.. This will Take Some Time</i>")
-        for chat_id in query:
+        for u in query:
+            chat_id = u[0] if isinstance(u, (tuple, list)) else (u.get('_id') if isinstance(u, dict) else u)
             try:
                 await broadcast_msg.copy(chat_id)
                 successful += 1
             except FloodWait as e:
-                await asyncio.sleep(e.x)
-                await broadcast_msg.copy(chat_id)
-                successful += 1
+                wait_time = getattr(e, 'value', getattr(e, 'x', 1))
+                await asyncio.sleep(wait_time)
+                try:
+                    await broadcast_msg.copy(chat_id)
+                    successful += 1
+                except Exception:
+                    unsuccessful += 1
             except UserIsBlocked:
                 await del_user(chat_id)
                 blocked += 1
             except InputUserDeactivated:
                 await del_user(chat_id)
                 deleted += 1
-            except:
+            except Exception:
                 unsuccessful += 1
-                pass
             total += 1
         
         status = f"""<b><u>Broadcast Completed</u>
@@ -277,7 +386,10 @@ Unsuccessful: <code>{unsuccessful}</code></b>"""
     else:
         msg = await message.reply(REPLY_ERROR)
         await asyncio.sleep(8)
-        await msg.delete()
+        try:
+            await msg.delete()
+        except Exception:
+            pass
 
 
 @Bot.on_message(filters.command('add') & filters.private & filters.user(ADMINS))
@@ -342,7 +454,12 @@ async def add_special_user_handler(client: Bot, message: Message):
                         username = doc.get('username')
 
             uname_str = f" (@{username})" if username else ""
-            display = f"<a href='tg://user?id={u_id}'>{html.escape(name)}</a>{uname_str} (<code>{u_id}</code>)" if name else f"<code>{u_id}</code>"
+            if name:
+                display = f"<a href='tg://user?id={u_id}'>{html.escape(name)}</a>{uname_str}  - <code>{u_id}</code>"
+            elif username:
+                display = f"<a href='tg://user?id={u_id}'>@{username}</a>  - <code>{u_id}</code>"
+            else:
+                display = f"<a href='tg://user?id={u_id}'>User</a>  - <code>{u_id}</code>"
 
             if await present_special_user(u_id):
                 if name or username:
@@ -351,6 +468,7 @@ async def add_special_user_handler(client: Bot, message: Message):
             else:
                 await add_special_user(u_id, name=name, username=username)
                 added.append(display)
+                logger.info(f"Added special user: {u_id} ({name or 'No name'})")
         except Exception as e:
             failed.append(f"{u_id} ({e})")
 
@@ -413,8 +531,14 @@ async def remove_special_user_handler(client: Bot, message: Message):
 
                 await del_special_user(u_id)
                 uname_str = f" (@{username})" if username else ""
-                display = f"<a href='tg://user?id={u_id}'>{html.escape(name)}</a>{uname_str} (<code>{u_id}</code>)" if name else f"<code>{u_id}</code>"
+                if name:
+                    display = f"<a href='tg://user?id={u_id}'>{html.escape(name)}</a>{uname_str}  - <code>{u_id}</code>"
+                elif username:
+                    display = f"<a href='tg://user?id={u_id}'>@{username}</a>  - <code>{u_id}</code>"
+                else:
+                    display = f"<a href='tg://user?id={u_id}'>User</a>  - <code>{u_id}</code>"
                 removed.append(display)
+                logger.info(f"Removed special user: {u_id} ({name or 'No name'})")
             else:
                 not_found.append(f"<code>{u_id}</code>")
         except Exception as e:
@@ -430,6 +554,19 @@ async def remove_special_user_handler(client: Bot, message: Message):
 
     await message.reply_text("\n\n".join(res), quote=True)
 
+@Bot.on_message(filters.command('log') & filters.private & filters.user(ADMINS))
+async def show_log(client: Bot, message: Message):
+    if os.path.exists(LOG_FILE_NAME):
+        try:
+            await message.reply_document(
+                document=LOG_FILE_NAME,
+                caption="Here is the log file.",
+                quote=True
+            )
+        except Exception as e:
+            await message.reply_text(f"Failed to send log file: {e}", quote=True)
+    else:
+        await message.reply_text("Log file not found.", quote=True)
 
 @Bot.on_message(filters.command(['special_users', 'specialusers', 'special']) & filters.private & filters.user(ADMINS))
 async def list_special_users_command(client: Bot, message: Message):
@@ -474,15 +611,17 @@ async def list_special_users_command(client: Bot, message: Message):
                 pass
 
         # 3. Format lines
+        uname_str = f" (@{username})" if username else ""
         if name:
             escaped_name = html.escape(name)
-            uname_str = f" (@{username})" if username else ""
-            html_line = f"• <a href='tg://user?id={uid}'>{escaped_name}</a>{uname_str} - <code>{uid}</code>"
+            html_line = f"• <a href='tg://user?id={uid}'>{escaped_name}</a>{uname_str}  - <code>{uid}</code>"
             plain_line = f"{idx}. {name}{uname_str} - ID: {uid}"
+        elif username:
+            html_line = f"• <a href='tg://user?id={uid}'>@{username}</a>  - <code>{uid}</code>"
+            plain_line = f"{idx}. @{username} - ID: {uid}"
         else:
-            uname_str = f" (@{username})" if username else ""
-            html_line = f"• <i>Hidden / Unavailable</i>{uname_str} - <code>{uid}</code>"
-            plain_line = f"{idx}. ID: {uid} (Name Unavailable){uname_str}"
+            html_line = f"• <a href='tg://user?id={uid}'>User</a>  - <code>{uid}</code>"
+            plain_line = f"{idx}. ID: {uid} (Name Unavailable)"
 
         formatted_users.append(html_line)
         plain_users.append(plain_line)
@@ -492,17 +631,31 @@ async def list_special_users_command(client: Bot, message: Message):
 
     if len(text) > 4000:
         file_name = "special_users.txt"
-        with open(file_name, "w", encoding="utf-8") as f:
-            f.write(f"Total Special Users: {len(users)}\n\n" + "\n".join(plain_users))
-        await message.reply_document(
-            document=file_name,
-            caption=f"<b>Total Special Users:</b> <code>{len(users)}</code>",
-            quote=True
-        )
-        await wait_msg.delete()
-        if os.path.exists(file_name):
-            os.remove(file_name)
+        try:
+            with open(file_name, "w", encoding="utf-8") as f:
+                f.write(f"Total Special Users: {len(users)}\n\n" + "\n".join(plain_users))
+            await message.reply_document(
+                document=file_name,
+                caption=f"<b>Total Special Users:</b> <code>{len(users)}</code>",
+                quote=True
+            )
+            try:
+                await wait_msg.delete()
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                await wait_msg.edit_text(f"Error generating special users list file: {e}")
+            except Exception:
+                pass
+        finally:
+            if os.path.exists(file_name):
+                try:
+                    os.remove(file_name)
+                except Exception:
+                    pass
     else:
-        await wait_msg.edit_text(text, disable_web_page_preview=True)
-
-
+        try:
+            await wait_msg.edit_text(text, disable_web_page_preview=True)
+        except Exception:
+            await message.reply_text(text, disable_web_page_preview=True, quote=True)

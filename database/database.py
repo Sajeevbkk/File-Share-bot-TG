@@ -41,12 +41,20 @@ async def full_userbase():
     user_docs = user_data.find()
     user_ids = []
     for doc in user_docs:
-        user_ids.append(doc['_id'])
+        user_ids.append((doc['_id'], doc.get('name')))
         
     return user_ids
 
-async def del_user(user_id: int):
-    user_data.delete_one({'_id': user_id})
+async def full_user_ids():
+    user_docs = user_data.find()
+    return [doc['_id'] for doc in user_docs]
+
+async def del_user(user_id):
+    if isinstance(user_id, (tuple, list)):
+        user_id = user_id[0]
+    elif isinstance(user_id, dict):
+        user_id = user_id.get('_id')
+    user_data.delete_one({'_id': int(user_id)})
     return
 
 async def present_special_user(user_id : int):
@@ -68,8 +76,12 @@ async def add_special_user(user_id: int, name: str = None, username: str = None)
 async def get_special_user(user_id: int):
     return special_user_data.find_one({'_id': user_id})
 
-async def del_special_user(user_id: int):
-    special_user_data.delete_one({'_id': user_id})
+async def del_special_user(user_id):
+    if isinstance(user_id, (tuple, list)):
+        user_id = user_id[0]
+    elif isinstance(user_id, dict):
+        user_id = user_id.get('_id')
+    special_user_data.delete_one({'_id': int(user_id)})
     return
 
 async def full_special_userbase():
