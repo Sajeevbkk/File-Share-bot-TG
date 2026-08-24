@@ -94,6 +94,8 @@ async def get_message_id(client, message):
         return 0
 
 def get_readable_time(seconds: int) -> str:
+    if not seconds:
+        return "0s"
     count = 0
     up_time = ""
     time_list = []
@@ -138,3 +140,24 @@ async def delete_file(messages, client, process):
 
 
 subscribed = filters.create(is_subscribed)
+
+# In-memory tracking of messages sent and received during the current bot session (user_id -> set of message_ids)
+SESSION_USER_MESSAGES = {}
+
+def track_session_message(chat_id: int, message_id: int):
+    try:
+        if not chat_id or not message_id:
+            return
+        chat_id = int(chat_id)
+        if chat_id > 0 and chat_id not in ADMINS:
+            if chat_id not in SESSION_USER_MESSAGES:
+                SESSION_USER_MESSAGES[chat_id] = set()
+            SESSION_USER_MESSAGES[chat_id].add(int(message_id))
+    except Exception:
+        pass
+
+def get_session_user_messages():
+    return dict(SESSION_USER_MESSAGES)
+
+def clear_session_user_messages():
+    SESSION_USER_MESSAGES.clear()

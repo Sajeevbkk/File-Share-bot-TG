@@ -3,11 +3,16 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from bot import Bot
-from config import ADMINS
+from config import ADMINS, LOGGER
 from helper_func import encode, get_message_id
+
+logger = LOGGER(__name__)
 
 @Bot.on_message(filters.private & filters.user(ADMINS) & filters.command('batch'))
 async def batch(client: Client, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /batch command")
     while True:
         try:
             first_message = await client.ask(text = "Forward the First Message from DB Channel (with Quotes)..\n\nor Send the DB Channel Post Link", chat_id = message.from_user.id, filters=(filters.forwarded | (filters.text & ~filters.forwarded)), timeout=60)
@@ -42,6 +47,9 @@ async def batch(client: Client, message: Message):
 
 @Bot.on_message(filters.private & filters.user(ADMINS) & filters.command('genlink'))
 async def link_generator(client: Client, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /genlink command")
     while True:
         try:
             channel_message = await client.ask(text = "Forward Message from the DB Channel (with Quotes)..\nor Send the DB Channel Post link", chat_id = message.from_user.id, filters=(filters.forwarded | (filters.text & ~filters.forwarded)), timeout=60)

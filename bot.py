@@ -10,6 +10,7 @@ import sys
 from datetime import datetime
 
 from config import API_HASH, APP_ID, LOGGER, TG_BOT_TOKEN, TG_BOT_WORKERS, FORCE_SUB_CHANNEL, CHANNEL_ID, PORT
+from helper_func import track_session_message
 
 
 ascii_art = """
@@ -95,3 +96,57 @@ class Bot(Client):
     async def stop(self, *args):
         await super().stop()
         self.LOGGER(__name__).info("Bot stopped.")
+
+    async def send_message(self, chat_id, *args, **kwargs):
+        msg = await super().send_message(chat_id, *args, **kwargs)
+        if msg and hasattr(msg, 'id'):
+            track_session_message(chat_id, msg.id)
+        return msg
+
+    async def copy_message(self, chat_id, *args, **kwargs):
+        msg = await super().copy_message(chat_id, *args, **kwargs)
+        if msg and hasattr(msg, 'id'):
+            track_session_message(chat_id, msg.id)
+        return msg
+
+    async def send_cached_media(self, chat_id, *args, **kwargs):
+        msg = await super().send_cached_media(chat_id, *args, **kwargs)
+        if msg and hasattr(msg, 'id'):
+            track_session_message(chat_id, msg.id)
+        return msg
+
+    async def send_document(self, chat_id, *args, **kwargs):
+        msg = await super().send_document(chat_id, *args, **kwargs)
+        if msg and hasattr(msg, 'id'):
+            track_session_message(chat_id, msg.id)
+        return msg
+
+    async def send_photo(self, chat_id, *args, **kwargs):
+        msg = await super().send_photo(chat_id, *args, **kwargs)
+        if msg and hasattr(msg, 'id'):
+            track_session_message(chat_id, msg.id)
+        return msg
+
+    async def send_video(self, chat_id, *args, **kwargs):
+        msg = await super().send_video(chat_id, *args, **kwargs)
+        if msg and hasattr(msg, 'id'):
+            track_session_message(chat_id, msg.id)
+        return msg
+
+    async def send_audio(self, chat_id, *args, **kwargs):
+        msg = await super().send_audio(chat_id, *args, **kwargs)
+        if msg and hasattr(msg, 'id'):
+            track_session_message(chat_id, msg.id)
+        return msg
+
+    async def send_animation(self, chat_id, *args, **kwargs):
+        msg = await super().send_animation(chat_id, *args, **kwargs)
+        if msg and hasattr(msg, 'id'):
+            track_session_message(chat_id, msg.id)
+        return msg
+
+    async def send_voice(self, chat_id, *args, **kwargs):
+        msg = await super().send_voice(chat_id, *args, **kwargs)
+        if msg and hasattr(msg, 'id'):
+            track_session_message(chat_id, msg.id)
+        return msg

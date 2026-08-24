@@ -10,10 +10,15 @@ from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
 
 from bot import Bot
 from config import ADMINS, FORCE_MSG, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, JOIN_REQUEST_ENABLE, FORCE_SUB_CHANNEL, UNAUTHORIZED_TEXT, LOG_FILE_NAME, LOGGER
-from helper_func import subscribed, decode, get_messages, delete_file
+from helper_func import subscribed, decode, get_messages, delete_file, get_readable_time, track_session_message, get_session_user_messages, clear_session_user_messages
 from database.database import add_user, del_user, full_userbase, present_user, get_user, present_special_user, add_special_user, del_special_user, full_special_userbase, get_special_user
 
 logger = LOGGER(__name__)
+
+@Bot.on_message(filters.private & ~filters.user(ADMINS), group=-1)
+async def track_incoming_session_messages(client: Bot, message: Message):
+    if message.chat and message.chat.id and message.id:
+        track_session_message(message.chat.id, message.id)
 
 @Bot.on_message(filters.command('start') & filters.private & subscribed)
 async def start_command(client: Client, message: Message):
@@ -172,7 +177,7 @@ async def start_command(client: Client, message: Message):
             try:
                 delete_data = await client.send_message(
                     chat_id=message.from_user.id,
-                    text=AUTO_DELETE_MSG.format(time=AUTO_DELETE_TIME)
+                    text=AUTO_DELETE_MSG.format(time=get_readable_time(AUTO_DELETE_TIME))
                 )
                 asyncio.create_task(delete_file(track_msgs, client, delete_data))
             except Exception as e:
@@ -308,6 +313,9 @@ async def not_joined(client: Client, message: Message):
 
 @Bot.on_message(filters.command('users') & filters.private & filters.user(ADMINS))
 async def get_users(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /users command")
     msg = await client.send_message(chat_id=message.chat.id, text=WAIT_MSG)
     users = await full_userbase()
     
@@ -340,6 +348,9 @@ async def get_users(client: Bot, message: Message):
 
 @Bot.on_message(filters.private & filters.command('broadcast') & filters.user(ADMINS))
 async def send_text(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /broadcast command")
     if message.reply_to_message:
         query = await full_userbase()
         broadcast_msg = message.reply_to_message
@@ -394,6 +405,9 @@ Unsuccessful: <code>{unsuccessful}</code></b>"""
 
 @Bot.on_message(filters.command('add') & filters.private & filters.user(ADMINS))
 async def add_special_user_handler(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /add command: {message.text}")
     user_ids = []
     user_info_map = {}
 
@@ -485,6 +499,9 @@ async def add_special_user_handler(client: Bot, message: Message):
 
 @Bot.on_message(filters.command('remove') & filters.private & filters.user(ADMINS))
 async def remove_special_user_handler(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /remove command: {message.text}")
     user_ids = []
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user or message.reply_to_message.forward_from
@@ -556,6 +573,9 @@ async def remove_special_user_handler(client: Bot, message: Message):
 
 @Bot.on_message(filters.command('log') & filters.private & filters.user(ADMINS))
 async def show_log(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /log command")
     if os.path.exists(LOG_FILE_NAME):
         try:
             await message.reply_document(
@@ -564,12 +584,105 @@ async def show_log(client: Bot, message: Message):
                 quote=True
             )
         except Exception as e:
+            logger.error(f"Failed to send log file: {e}")
             await message.reply_text(f"Failed to send log file: {e}", quote=True)
     else:
         await message.reply_text("Log file not found.", quote=True)
 
+@Bot.on_message(filters.command(['clearlog', 'clearlogs', 'clear_log']) & filters.private & filters.user(ADMINS))
+async def clear_log(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    cmd_name = message.command[0] if message.command else "clearlog"
+    try:
+        if os.path.exists(LOG_FILE_NAME):
+            with open(LOG_FILE_NAME, "w") as f:
+                f.truncate(0)
+        else:
+            with open(LOG_FILE_NAME, "w") as f:
+                pass
+
+        # Also clean up any rotated log backups (e.g. filesharingbot.txt.1, .2, etc.)
+        dir_name = os.path.dirname(LOG_FILE_NAME) or "."
+        base_name = os.path.basename(LOG_FILE_NAME)
+        for fname in os.listdir(dir_name):
+            if fname.startswith(base_name + "."):
+                try:
+                    os.remove(os.path.join(dir_name, fname))
+                except Exception:
+                    pass
+
+        logger.info(f"Admin {admin_id} ({admin_name}) used /{cmd_name} to clear log file")
+        await message.reply_text("✅ <b>Log file cleared successfully! Started a fresh log.</b>", quote=True)
+    except Exception as e:
+        logger.error(f"Failed to clear log file: {e}")
+        await message.reply_text(f"❌ <b>Failed to clear log file:</b> <code>{e}</code>", quote=True)
+
+@Bot.on_message(filters.command(['clearchats', 'clearchat', 'clear_chats', 'clear_chat']) & filters.private & filters.user(ADMINS))
+async def clear_chats_command(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    cmd_name = message.command[0] if message.command else "clearchats"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /{cmd_name} command")
+
+    session_data = get_session_user_messages()
+    # Filter out any admins to guarantee admin chats are never touched
+    targets = {uid: msgs for uid, msgs in session_data.items() if uid not in ADMINS and msgs}
+
+    if not targets:
+        await message.reply_text("ℹ️ No session messages found with users to clear.", quote=True)
+        return
+
+    total_msgs_count = sum(len(msgs) for msgs in targets.values())
+    status_msg = await message.reply_text(
+        f"<i>Clearing {total_msgs_count} messages across {len(targets)} user chat(s)...</i>",
+        quote=True
+    )
+
+    deleted_count = 0
+    users_cleared = 0
+
+    for u_id, msg_ids in targets.items():
+        msg_id_list = list(msg_ids)
+        if not msg_id_list:
+            continue
+
+        user_deleted = 0
+        for i in range(0, len(msg_id_list), 100):
+            chunk = msg_id_list[i:i + 100]
+            try:
+                del_res = await client.delete_messages(chat_id=u_id, message_ids=chunk, revoke=True)
+                user_deleted += len(chunk) if del_res is None else (del_res if isinstance(del_res, int) and del_res > 0 else len(chunk))
+            except FloodWait as e:
+                wait_time = getattr(e, 'value', getattr(e, 'x', 1))
+                await asyncio.sleep(wait_time)
+                try:
+                    del_res = await client.delete_messages(chat_id=u_id, message_ids=chunk, revoke=True)
+                    user_deleted += len(chunk) if del_res is None else (del_res if isinstance(del_res, int) and del_res > 0 else len(chunk))
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.warning(f"Failed to delete session messages for user {u_id}: {e}")
+
+        if user_deleted > 0:
+            deleted_count += user_deleted
+            users_cleared += 1
+
+    clear_session_user_messages()
+    logger.info(f"Admin {admin_id} ({admin_name}) cleared {deleted_count} messages across {users_cleared} user chat(s)")
+
+    await status_msg.edit_text(
+        f"✅ <b>Chats cleared successfully!</b>\n\n"
+        f"• <b>Users affected:</b> <code>{users_cleared}</code>\n"
+        f"• <b>Messages deleted:</b> <code>{deleted_count}</code>"
+    )
+
 @Bot.on_message(filters.command(['special_users', 'specialusers', 'special']) & filters.private & filters.user(ADMINS))
 async def list_special_users_command(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    cmd_name = message.command[0] if message.command else "special_users"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /{cmd_name} command")
     users = await full_special_userbase()
     if not users:
         await message.reply_text("ℹ️ No special users found in the database.", quote=True)
