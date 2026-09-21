@@ -30,7 +30,12 @@ DB_URI = os.environ.get("DATABASE_URL", "")
 DB_NAME = os.environ.get("DATABASE_NAME", "filesharexbot")
 
 #force sub channel id
-FORCE_SUB_CHANNEL = int(os.environ.get("FORCE_SUB_CHANNEL", "0"))
+_raw_force_sub = os.environ.get("FORCE_SUB_CHANNEL", "0")
+_clean_force_sub = _raw_force_sub.strip() if _raw_force_sub else ""
+try:
+    FORCE_SUB_CHANNEL = int(_clean_force_sub or "0")
+except ValueError:
+    raise Exception("FORCE_SUB_CHANNEL environment variable must be a valid integer.")
 if FORCE_SUB_CHANNEL == 0:
     raise Exception("FORCE_SUB_CHANNEL environment variable is mandatory.")
 JOIN_REQUEST_ENABLE = os.environ.get("JOIN_REQUEST_ENABLED", None)

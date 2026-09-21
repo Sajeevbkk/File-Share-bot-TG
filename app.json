@@ -38,8 +38,8 @@
       "value": "-100"
     },
     "FORCE_SUB_CHANNEL":{
-      "description": "id of the channel or group, if you want enable force sub feature else put 0",
-      "value": "0"
+      "description": "Mandatory ID of the channel or group for force sub feature (e.g. -100xxxxxxxxxx)",
+      "value": ""
     },
     "START_MESSAGE": {
       "description": "Optional: start message of bot, use HTML parsemode format",

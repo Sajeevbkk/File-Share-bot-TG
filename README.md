@@ -54,7 +54,7 @@ We encourage all developers to contribute ideas, report bugs, and share improvem
 ### Setup
 
 - Add the bot to Database Channel with all permission
-- Add bot to ForceSub channel as Admin with Invite Users via Link Permission if you enabled ForceSub 
+- Add bot to ForceSub channel as Admin with Invite Users via Link Permission 
 
 ##
 ### Installation
@@ -115,7 +115,7 @@ python3 main.py
 * `START_MESSAGE` Optional: start message of bot, use HTML and <a href='https://github.com/codexbotz/File-Sharing-Bot/blob/main/README.md#start_message'>fillings</a>
 * `START_PIC` Optional: URL or file path of the image to be sent as the start message
 * `FORCE_SUB_MESSAGE`Optional:Force sub message of bot, use HTML and Fillings
-* `FORCE_SUB_CHANNEL` Optional: ForceSub Channel ID, leave 0 if you want disable force sub
+* `FORCE_SUB_CHANNEL` Mandatory: ForceSub Channel ID (e.g. -100xxxxxxxxxx)
 * `PROTECT_CONTENT` Optional: True if you need to prevent files from forwarding
 * `AUTO_DELETE_TIME `  Set the time in seconds for automatic file deletion. Default is False, which disables auto-deletion.
 * `JOIN_REQUEST_ENABLED` Optional: Set to "True" to enable join request for the channel. Default is "False".

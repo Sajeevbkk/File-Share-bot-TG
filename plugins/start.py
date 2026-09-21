@@ -9,9 +9,9 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
 
 from bot import Bot
-from config import ADMINS, FORCE_MSG, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, JOIN_REQUEST_ENABLE, FORCE_SUB_CHANNEL, UNAUTHORIZED_TEXT, LOG_FILE_NAME, LOGGER
+from config import ADMINS, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, LOG_FILE_NAME, LOGGER
 from helper_func import subscribed, decode, get_messages, delete_file, get_readable_time, track_session_message, get_session_user_messages, clear_session_user_messages
-from database.database import add_user, del_user, full_userbase, present_user, get_user
+from database.database import add_user, del_user, full_userbase
 
 logger = LOGGER(__name__)
 
@@ -404,13 +404,13 @@ async def clear_chats_command(client: Bot, message: Message):
             chunk = msg_id_list[i:i + 100]
             try:
                 del_res = await client.delete_messages(chat_id=u_id, message_ids=chunk, revoke=True)
-                user_deleted += len(chunk) if del_res is None else (del_res if isinstance(del_res, int) and del_res > 0 else len(chunk))
+                user_deleted += len(chunk) if (del_res is None or isinstance(del_res, bool)) else (del_res if isinstance(del_res, int) and del_res > 0 else len(chunk))
             except FloodWait as e:
                 wait_time = getattr(e, 'value', getattr(e, 'x', 1))
                 await asyncio.sleep(wait_time)
                 try:
                     del_res = await client.delete_messages(chat_id=u_id, message_ids=chunk, revoke=True)
-                    user_deleted += len(chunk) if del_res is None else (del_res if isinstance(del_res, int) and del_res > 0 else len(chunk))
+                    user_deleted += len(chunk) if (del_res is None or isinstance(del_res, bool)) else (del_res if isinstance(del_res, int) and del_res > 0 else len(chunk))
                 except Exception:
                     pass
             except Exception as e:
