@@ -11,7 +11,7 @@ from helper_func import encode
 
 logger = LOGGER(__name__)
 
-@Bot.on_message(filters.private & filters.user(ADMINS) & ~filters.command(['start','users','broadcast','batch','genlink','stats','add','remove','special_users','specialusers','special','log','clearlog','clear_log','clearlogs','clearchats','clearchat','clear_chats','clear_chat']))
+@Bot.on_message(filters.private & filters.user(ADMINS) & ~filters.command(['start','users','broadcast','batch','genlink','stats','log','clearlog','clear_log','clearlogs','clearchats','clearchat','clear_chats','clear_chat']))
 async def channel_post(client: Client, message: Message):
     admin_id = message.from_user.id if message.from_user else "Unknown"
     admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"

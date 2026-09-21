@@ -96,12 +96,6 @@ python3 main.py
 
 /genlink - create link for one post
 
-/add - add user(s) to special users list who can access files
-
-/remove - remove user(s) from special users list
-
-/special_users - view list of all authorized special users
-
 /users - view bot statistics
 
 /broadcast - broadcast any messages to bot users

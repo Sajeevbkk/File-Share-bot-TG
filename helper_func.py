@@ -149,7 +149,7 @@ def track_session_message(chat_id: int, message_id: int):
         if not chat_id or not message_id:
             return
         chat_id = int(chat_id)
-        if chat_id > 0 and chat_id not in ADMINS:
+        if chat_id > 0:
             if chat_id not in SESSION_USER_MESSAGES:
                 SESSION_USER_MESSAGES[chat_id] = set()
             SESSION_USER_MESSAGES[chat_id].add(int(message_id))

@@ -15,7 +15,9 @@ async def stats(bot: Bot, message: Message):
     time = get_readable_time(int(delta.total_seconds()))
     await message.reply(BOT_STATS_TEXT.format(uptime=time))
 
-@Bot.on_message(filters.private & filters.incoming & ~filters.user(ADMINS) & ~filters.command(['start','users','broadcast','batch','genlink','stats','add','remove','special_users','specialusers','special','log','clearlog','clear_log','clearlogs','clearchats','clearchat','clear_chats','clear_chat']))
+from helper_func import subscribed
+
+@Bot.on_message(filters.private & filters.incoming & subscribed & ~filters.user(ADMINS) & ~filters.command(['start','users','broadcast','batch','genlink','stats','log','clearlog','clear_log','clearlogs','clearchats','clearchat','clear_chats','clear_chat']))
 async def useless(_, message: Message):
     if not message.from_user:
         return
