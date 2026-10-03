@@ -3,7 +3,7 @@ from pyrogram.types import Message
 from pyrogram import filters
 from config import ADMINS, BOT_STATS_TEXT, USER_REPLY_TEXT, LOGGER
 from datetime import datetime
-from helper_func import get_readable_time, subscribed
+from helper_func import get_readable_time, subscribed, not_banned
 
 @Bot.on_message(filters.command('stats') & filters.user(ADMINS))
 async def stats(bot: Bot, message: Message):
@@ -15,7 +15,7 @@ async def stats(bot: Bot, message: Message):
     time = get_readable_time(int(delta.total_seconds()))
     await message.reply(BOT_STATS_TEXT.format(uptime=time))
 
-@Bot.on_message(filters.private & filters.incoming & subscribed & ~filters.user(ADMINS) & ~filters.command(['start','users','broadcast','batch','genlink','stats','log','clearlog','clear_log','clearlogs','clearchats','clearchat','clear_chats','clear_chat']))
+@Bot.on_message(filters.private & filters.incoming & subscribed & not_banned & ~filters.user(ADMINS) & ~filters.command(['start','users','broadcast','batch','genlink','stats','log','clearlog','clear_log','clearlogs','clearchats','clearchat','clear_chats','clear_chat','ban','unban','banned']))
 async def useless(_, message: Message):
     if not message.from_user:
         return

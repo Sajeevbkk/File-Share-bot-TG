@@ -5,22 +5,66 @@ import html
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
 
 from bot import Bot
-from config import ADMINS, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, LOG_FILE_NAME, LOGGER
-from helper_func import subscribed, decode, get_messages, delete_file, get_readable_time, track_session_message, get_session_user_messages, clear_session_user_messages
-from database.database import add_user, del_user, full_userbase
+from config import (
+    ADMINS,
+    OWNER_ID,
+    START_MSG,
+    FORCE_MSG,
+    FORCE_SUB_CHANNEL,
+    CUSTOM_CAPTION,
+    DISABLE_CHANNEL_BUTTON,
+    PROTECT_CONTENT,
+    START_PIC,
+    AUTO_DELETE_TIME,
+    AUTO_DELETE_MSG,
+    LOG_FILE_NAME,
+    LOGGER
+)
+from helper_func import (
+    subscribed,
+    not_banned,
+    decode,
+    get_messages,
+    delete_file,
+    get_readable_time,
+    track_session_message,
+    get_session_user_messages,
+    clear_session_user_messages,
+    get_channel_post_link
+)
+from database.database import (
+    add_user,
+    del_user,
+    full_userbase,
+    get_user,
+    is_user_banned,
+    ban_user,
+    unban_user,
+    full_banned_users
+)
 
 logger = LOGGER(__name__)
 
-@Bot.on_message(filters.private, group=-1)
+@Bot.on_message(filters.private, group=-2)
+async def check_banned_user_msg(client: Bot, message: Message):
+    if message.from_user and await is_user_banned(message.from_user.id):
+        message.stop_propagation()
+
+@Bot.on_callback_query(group=-2)
+async def check_banned_user_cb(client: Bot, query: CallbackQuery):
+    if query.from_user and await is_user_banned(query.from_user.id):
+        query.stop_propagation()
+
+@Bot.on_message(filters.private & not_banned, group=-1)
 async def track_incoming_session_messages(client: Bot, message: Message):
     if message.chat and message.chat.id and message.id:
         track_session_message(message.chat.id, message.id)
 
-@Bot.on_message(filters.command('start') & filters.private & subscribed)
+@Bot.on_message(filters.command('start') & filters.private & subscribed & not_banned)
 async def start_command(client: Client, message: Message):
     if not message.from_user:
         return
@@ -85,7 +129,12 @@ async def start_command(client: Client, message: Message):
         except Exception:
             pass
 
+        if not messages:
+            await message.reply_text("File not found or message was deleted from DB Channel..!")
+            return
+
         track_msgs = []
+        file_entries = []
 
         for msg in messages:
             if not msg:
@@ -107,61 +156,102 @@ async def start_command(client: Client, message: Message):
             else:
                 reply_markup = None
 
-            if AUTO_DELETE_TIME and AUTO_DELETE_TIME > 0:
+            copied_channel_msg = None
+            try:
+                copied_channel_msg = await msg.copy(
+                    chat_id=FORCE_SUB_CHANNEL,
+                    caption=caption,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup,
+                    protect_content=PROTECT_CONTENT
+                )
+            except FloodWait as e:
+                wait_time = getattr(e, 'value', getattr(e, 'x', 1))
+                await asyncio.sleep(wait_time)
                 try:
-                    copied_msg_for_deletion = await msg.copy(
-                        chat_id=message.from_user.id,
+                    copied_channel_msg = await msg.copy(
+                        chat_id=FORCE_SUB_CHANNEL,
                         caption=caption,
                         parse_mode=ParseMode.HTML,
                         reply_markup=reply_markup,
                         protect_content=PROTECT_CONTENT
                     )
-                    if copied_msg_for_deletion:
-                        track_msgs.append(copied_msg_for_deletion)
-                except FloodWait as e:
-                    wait_time = getattr(e, 'value', getattr(e, 'x', 1))
-                    await asyncio.sleep(wait_time)
-                    try:
-                        copied_msg_for_deletion = await msg.copy(
-                            chat_id=message.from_user.id,
-                            caption=caption,
-                            parse_mode=ParseMode.HTML,
-                            reply_markup=reply_markup,
-                            protect_content=PROTECT_CONTENT
-                        )
-                        if copied_msg_for_deletion:
-                            track_msgs.append(copied_msg_for_deletion)
-                    except Exception as err:
-                        logger.error(f"Failed to copy message after retry: {err}")
-                except Exception as e:
-                    logger.error(f"Error copying message: {e}")
-            else:
-                try:
-                    await msg.copy(
-                        chat_id=message.from_user.id,
-                        caption=caption,
-                        parse_mode=ParseMode.HTML,
-                        reply_markup=reply_markup,
-                        protect_content=PROTECT_CONTENT
-                    )
-                    await asyncio.sleep(0.5)
-                except FloodWait as e:
-                    wait_time = getattr(e, 'value', getattr(e, 'x', 1))
-                    await asyncio.sleep(wait_time)
-                    try:
-                        await msg.copy(
-                            chat_id=message.from_user.id,
-                            caption=caption,
-                            parse_mode=ParseMode.HTML,
-                            reply_markup=reply_markup,
-                            protect_content=PROTECT_CONTENT
-                        )
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                except Exception as err:
+                    logger.error(f"Failed to copy message to force sub channel after retry: {err}")
+            except Exception as e:
+                logger.error(f"Error copying message to force sub channel: {e}")
 
-        if track_msgs:
+            if not copied_channel_msg:
+                continue
+
+            track_msgs.append(copied_channel_msg)
+            post_link = copied_channel_msg.link
+            if not post_link:
+                fsub_uname = getattr(client, "force_sub_chat", None) and client.force_sub_chat.username
+                post_link = get_channel_post_link(FORCE_SUB_CHANNEL, copied_channel_msg.id, username=fsub_uname)
+
+            file_name = None
+            if getattr(msg, 'document', None):
+                file_name = msg.document.file_name
+            elif getattr(msg, 'video', None):
+                file_name = msg.video.file_name
+            elif getattr(msg, 'audio', None):
+                file_name = msg.audio.file_name
+
+            file_entries.append({
+                'name': file_name,
+                'link': post_link,
+                'msg': copied_channel_msg
+            })
+
+        if not file_entries:
+            await message.reply_text("Failed to process requested file(s). Please try again later.")
+            return
+
+        private_link_messages = []
+        if len(file_entries) == 1:
+            entry = file_entries[0]
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("📁 Open File in Channel", url=entry['link'])]])
+            name_text = f"<b>File:</b> <code>{html.escape(entry['name'])}</code>\n\n" if entry['name'] else ""
+            link_text = (
+                f"✅ <b>Your file is ready!</b>\n\n"
+                f"{name_text}"
+                f"🔗 <b>Link:</b> <a href='{entry['link']}'>{entry['link']}</a>\n\n"
+                f"<i>Click the button below to view and download it in the channel.</i>"
+            )
+            sent_link_msg = await client.send_message(
+                chat_id=message.from_user.id,
+                text=link_text,
+                reply_markup=btn,
+                disable_web_page_preview=True
+            )
+            private_link_messages.append(sent_link_msg)
+        else:
+            buttons = []
+            links_formatted = []
+            for idx, entry in enumerate(file_entries, start=1):
+                display_name = entry['name'] or f"File {idx}"
+                links_formatted.append(f"{idx}. <a href='{entry['link']}'>{html.escape(display_name)}</a>")
+                buttons.append([InlineKeyboardButton(f"📁 {display_name[:28]}", url=entry['link'])])
+
+            batch_text = (
+                f"✅ <b>Your batch files are ready!</b>\n\n"
+                f"<b>Total Files:</b> <code>{len(file_entries)}</code>\n\n"
+                + "\n".join(links_formatted) +
+                f"\n\n<i>Click below to view the files in the channel.</i>"
+            )
+            markup = InlineKeyboardMarkup(buttons) if len(buttons) <= 10 else None
+            sent_link_msg = await client.send_message(
+                chat_id=message.from_user.id,
+                text=batch_text,
+                reply_markup=markup,
+                disable_web_page_preview=True
+            )
+            private_link_messages.append(sent_link_msg)
+
+        track_msgs.extend(private_link_messages)
+
+        if AUTO_DELETE_TIME and AUTO_DELETE_TIME > 0:
             try:
                 delete_data = await client.send_message(
                     chat_id=message.from_user.id,
@@ -220,6 +310,52 @@ async def start_command(client: Client, message: Message):
                 quote=True
             )
         return
+
+@Bot.on_message(filters.command('start') & filters.private & not_banned)
+async def not_joined(client: Client, message: Message):
+    if not message.from_user:
+        return
+    buttons = [
+        [
+            InlineKeyboardButton(
+                "📢 Join Channel",
+                url=client.invitelink
+            )
+        ]
+    ]
+    if len(message.command) > 1:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    "🔄 Try Again",
+                    url=f"https://t.me/{client.username}?start={message.command[1]}"
+                )
+            ]
+        )
+
+    first = message.from_user.first_name or ""
+    last = message.from_user.last_name or ""
+    username = None if not message.from_user.username else '@' + message.from_user.username
+    mention = message.from_user.mention
+    uid = message.from_user.id
+
+    try:
+        force_text = FORCE_MSG.format(
+            first=first,
+            last=last,
+            username=username,
+            mention=mention,
+            id=uid
+        )
+    except Exception:
+        force_text = FORCE_MSG
+
+    await message.reply_text(
+        text=force_text,
+        reply_markup=InlineKeyboardMarkup(buttons),
+        quote=True,
+        disable_web_page_preview=True
+    )
 
 
 #=====================================================================================##
@@ -428,3 +564,189 @@ async def clear_chats_command(client: Bot, message: Message):
         f"• <b>Users affected:</b> <code>{users_cleared}</code>\n"
         f"• <b>Messages deleted:</b> <code>{deleted_count}</code>"
     )
+
+@Bot.on_message(filters.command('ban') & filters.private & filters.user(ADMINS))
+async def ban_command(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /ban command: {message.text}")
+
+    target_user_id = None
+    reason = None
+
+    if message.reply_to_message:
+        target_user = message.reply_to_message.from_user or message.reply_to_message.forward_from
+        if target_user:
+            target_user_id = target_user.id
+        if len(message.command) > 1:
+            reason = " ".join(message.command[1:])
+    elif len(message.command) > 1:
+        try:
+            target_user_id = int(message.command[1])
+        except ValueError:
+            await message.reply_text("❌ <b>Invalid user ID.</b> User ID must be an integer.", quote=True)
+            return
+        if len(message.command) > 2:
+            reason = " ".join(message.command[2:])
+
+    if not target_user_id:
+        usage = (
+            "<b>Usage:</b>\n"
+            "• <code>/ban [user_id] [optional reason]</code>\n"
+            "• Reply to a user's message with <code>/ban [optional reason]</code>"
+        )
+        await message.reply_text(usage, quote=True)
+        return
+
+    if target_user_id in ADMINS or target_user_id == OWNER_ID:
+        await message.reply_text("❌ <b>You cannot ban an admin or the owner!</b>", quote=True)
+        return
+
+    target_name = None
+    target_username = None
+    try:
+        user_obj = await client.get_users(target_user_id)
+        if user_obj:
+            target_name = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip() or None
+            target_username = user_obj.username
+    except Exception:
+        pass
+
+    if not target_name:
+        try:
+            doc = await get_user(target_user_id)
+            if doc:
+                target_name = doc.get('name')
+                target_username = doc.get('username')
+        except Exception:
+            pass
+
+    await ban_user(
+        user_id=target_user_id,
+        reason=reason,
+        banned_by=message.from_user.id if message.from_user else None,
+        name=target_name,
+        username=target_username
+    )
+
+    uname_str = f" (@{target_username})" if target_username else ""
+    display_name = f"<a href='tg://user?id={target_user_id}'>{html.escape(target_name)}</a>" if target_name else f"<code>{target_user_id}</code>"
+    reason_str = html.escape(reason) if reason else "None specified"
+
+    await message.reply_text(
+        f"✅ <b>User has been banned successfully!</b>\n\n"
+        f"• <b>User:</b> {display_name}{uname_str}\n"
+        f"• <b>ID:</b> <code>{target_user_id}</code>\n"
+        f"• <b>Reason:</b> <code>{reason_str}</code>",
+        quote=True
+    )
+
+@Bot.on_message(filters.command('unban') & filters.private & filters.user(ADMINS))
+async def unban_command(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /unban command: {message.text}")
+
+    target_user_id = None
+
+    if message.reply_to_message:
+        target_user = message.reply_to_message.from_user or message.reply_to_message.forward_from
+        if target_user:
+            target_user_id = target_user.id
+    elif len(message.command) > 1:
+        try:
+            target_user_id = int(message.command[1])
+        except ValueError:
+            await message.reply_text("❌ <b>Invalid user ID.</b> User ID must be an integer.", quote=True)
+            return
+
+    if not target_user_id:
+        usage = (
+            "<b>Usage:</b>\n"
+            "• <code>/unban [user_id]</code>\n"
+            "• Reply to a user's message with <code>/unban</code>"
+        )
+        await message.reply_text(usage, quote=True)
+        return
+
+    res = await unban_user(target_user_id)
+    if res:
+        await message.reply_text(
+            f"✅ <b>User <code>{target_user_id}</code> has been unbanned successfully!</b>",
+            quote=True
+        )
+    else:
+        await message.reply_text(
+            f"ℹ️ <b>User <code>{target_user_id}</code> was not in the ban list.</b>",
+            quote=True
+        )
+
+@Bot.on_message(filters.command(['banned', 'banlist', 'bannedusers']) & filters.private & filters.user(ADMINS))
+async def list_banned_command(client: Bot, message: Message):
+    admin_id = message.from_user.id if message.from_user else "Unknown"
+    admin_name = message.from_user.first_name or "Admin" if message.from_user else "Admin"
+    logger.info(f"Admin {admin_id} ({admin_name}) used /banned command")
+
+    banned_users = await full_banned_users()
+    if not banned_users:
+        await message.reply_text("ℹ️ <b>No users are currently banned.</b>", quote=True)
+        return
+
+    wait_msg = await message.reply_text("<i>Fetching banned users list...</i>", quote=True)
+
+    formatted_users = []
+    plain_users = []
+
+    for idx, doc in enumerate(banned_users, start=1):
+        uid = doc.get('_id')
+        name = doc.get('name')
+        username = doc.get('username')
+        reason = doc.get('reason') or "No reason"
+
+        uname_str = f" (@{username})" if username else ""
+        if name:
+            escaped_name = html.escape(name)
+            html_line = f"• <a href='tg://user?id={uid}'>{escaped_name}</a>{uname_str} - <code>{uid}</code> (Reason: {html.escape(reason)})"
+            plain_line = f"{idx}. {name}{uname_str} - ID: {uid} (Reason: {reason})"
+        elif username:
+            html_line = f"• <a href='tg://user?id={uid}'>@{username}</a> - <code>{uid}</code> (Reason: {html.escape(reason)})"
+            plain_line = f"{idx}. @{username} - ID: {uid} (Reason: {reason})"
+        else:
+            html_line = f"• User - <code>{uid}</code> (Reason: {html.escape(reason)})"
+            plain_line = f"{idx}. ID: {uid} (Reason: {reason})"
+
+        formatted_users.append(html_line)
+        plain_users.append(plain_line)
+
+    text = f"<b>Total Banned Users:</b> <code>{len(banned_users)}</code>\n\n" + "\n".join(formatted_users)
+
+    if len(text) > 4000:
+        file_name = "banned_users.txt"
+        try:
+            with open(file_name, "w", encoding="utf-8") as f:
+                f.write(f"Total Banned Users: {len(banned_users)}\n\n" + "\n".join(plain_users))
+            await message.reply_document(
+                document=file_name,
+                caption=f"<b>Total Banned Users:</b> <code>{len(banned_users)}</code>",
+                quote=True
+            )
+            try:
+                await wait_msg.delete()
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                await wait_msg.edit_text(f"Error generating banned users list file: {e}")
+            except Exception:
+                pass
+        finally:
+            if os.path.exists(file_name):
+                try:
+                    os.remove(file_name)
+                except Exception:
+                    pass
+    else:
+        try:
+            await wait_msg.edit_text(text, disable_web_page_preview=True)
+        except Exception:
+            await message.reply_text(text, disable_web_page_preview=True, quote=True)

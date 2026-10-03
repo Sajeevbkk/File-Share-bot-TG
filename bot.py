@@ -11,6 +11,7 @@ from datetime import datetime
 
 from config import API_HASH, APP_ID, LOGGER, TG_BOT_TOKEN, TG_BOT_WORKERS, FORCE_SUB_CHANNEL, CHANNEL_ID, PORT
 from helper_func import track_session_message
+from database.database import load_banned_users_cache
 
 
 ascii_art = """
@@ -40,6 +41,7 @@ class Bot(Client):
         await super().start()
         usr_bot_me = await self.get_me()
         self.uptime = datetime.now()
+        await load_banned_users_cache()
 
         if FORCE_SUB_CHANNEL:
             try:
@@ -50,10 +52,13 @@ class Bot(Client):
                         await self.fetch_peers(f_res.chats)
                 except Exception:
                     pass
-                link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
+                force_sub_chat = await self.get_chat(FORCE_SUB_CHANNEL)
+                self.force_sub_chat = force_sub_chat
+                link = force_sub_chat.invite_link
                 if not link:
                     await self.export_chat_invite_link(FORCE_SUB_CHANNEL)
-                    link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
+                    self.force_sub_chat = await self.get_chat(FORCE_SUB_CHANNEL)
+                    link = self.force_sub_chat.invite_link
                 self.invitelink = link
             except Exception as a:
                 self.LOGGER(__name__).warning(a)

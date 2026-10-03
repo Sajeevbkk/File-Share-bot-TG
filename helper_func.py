@@ -143,6 +143,37 @@ async def delete_file(messages, client, process):
 
 subscribed = filters.create(is_subscribed)
 
+from database.database import BANNED_USERS_CACHE, is_user_banned
+
+async def is_banned_filter(filter, client, update):
+    user = getattr(update, "from_user", None)
+    if not user:
+        return False
+    if user.id in BANNED_USERS_CACHE:
+        return True
+    return await is_user_banned(user.id)
+
+async def not_banned_filter(filter, client, update):
+    user = getattr(update, "from_user", None)
+    if not user:
+        return True
+    if user.id in BANNED_USERS_CACHE:
+        return False
+    return not (await is_user_banned(user.id))
+
+banned = filters.create(is_banned_filter)
+not_banned = filters.create(not_banned_filter)
+
+def get_channel_post_link(chat_id, message_id: int, username: str = None) -> str:
+    if username:
+        return f"https://t.me/{username}/{message_id}"
+    clean_id = str(chat_id)
+    if clean_id.startswith("-100"):
+        clean_id = clean_id[4:]
+    elif clean_id.startswith("-"):
+        clean_id = clean_id[1:]
+    return f"https://t.me/c/{clean_id}/{message_id}"
+
 # In-memory tracking of messages sent and received during the current bot session (user_id -> set of message_ids)
 SESSION_USER_MESSAGES = {}
 
