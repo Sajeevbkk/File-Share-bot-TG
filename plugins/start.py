@@ -15,6 +15,7 @@ from config import (
     START_MSG,
     FORCE_MSG,
     FORCE_SUB_CHANNEL,
+    FORWARD_TO_CHANNEL,
     CUSTOM_CAPTION,
     DISABLE_CHANNEL_BUTTON,
     PROTECT_CONTENT,
@@ -34,7 +35,11 @@ from helper_func import (
     track_session_message,
     get_session_user_messages,
     clear_session_user_messages,
-    get_channel_post_link
+    get_channel_post_link,
+    get_unsubscribed_channels,
+    track_channel_message,
+    get_session_channel_messages,
+    clear_session_channel_messages
 )
 from database.database import (
     add_user,
@@ -159,7 +164,7 @@ async def start_command(client: Client, message: Message):
             copied_channel_msg = None
             try:
                 copied_channel_msg = await msg.copy(
-                    chat_id=FORCE_SUB_CHANNEL,
+                    chat_id=FORWARD_TO_CHANNEL,
                     caption=caption,
                     parse_mode=ParseMode.HTML,
                     reply_markup=reply_markup,
@@ -170,25 +175,26 @@ async def start_command(client: Client, message: Message):
                 await asyncio.sleep(wait_time)
                 try:
                     copied_channel_msg = await msg.copy(
-                        chat_id=FORCE_SUB_CHANNEL,
+                        chat_id=FORWARD_TO_CHANNEL,
                         caption=caption,
                         parse_mode=ParseMode.HTML,
                         reply_markup=reply_markup,
                         protect_content=PROTECT_CONTENT
                     )
                 except Exception as err:
-                    logger.error(f"Failed to copy message to force sub channel after retry: {err}")
+                    logger.error(f"Failed to copy message to forward channel after retry: {err}")
             except Exception as e:
-                logger.error(f"Error copying message to force sub channel: {e}")
+                logger.error(f"Error copying message to forward channel: {e}")
 
             if not copied_channel_msg:
                 continue
 
             track_msgs.append(copied_channel_msg)
+            track_channel_message(copied_channel_msg.id)
             post_link = copied_channel_msg.link
             if not post_link:
-                fsub_uname = getattr(client, "force_sub_chat", None) and client.force_sub_chat.username
-                post_link = get_channel_post_link(FORCE_SUB_CHANNEL, copied_channel_msg.id, username=fsub_uname)
+                fwd_uname = getattr(client, "forward_to_chat", None) and client.forward_to_chat.username
+                post_link = get_channel_post_link(FORWARD_TO_CHANNEL, copied_channel_msg.id, username=fwd_uname)
 
             file_name = None
             if getattr(msg, 'document', None):
@@ -315,14 +321,32 @@ async def start_command(client: Client, message: Message):
 async def not_joined(client: Client, message: Message):
     if not message.from_user:
         return
-    buttons = [
-        [
-            InlineKeyboardButton(
-                "📢 Join Channel",
-                url=client.invitelink
-            )
-        ]
-    ]
+    user_id = message.from_user.id
+    unsubscribed_channels = await get_unsubscribed_channels(client, user_id)
+    if not unsubscribed_channels:
+        return await start_command(client, message)
+
+    buttons = []
+    for ch_id in unsubscribed_channels:
+        link = getattr(client, "invitelinks", {}).get(ch_id)
+        if not link:
+            try:
+                chat = await client.get_chat(ch_id)
+                link = chat.invite_link or await client.export_chat_invite_link(ch_id)
+                if hasattr(client, "invitelinks"):
+                    client.invitelinks[ch_id] = link
+            except Exception:
+                continue
+        if len(FORCE_SUB_CHANNEL) > 1:
+            try:
+                idx = FORCE_SUB_CHANNEL.index(ch_id) + 1
+            except ValueError:
+                idx = 1
+            label = f"📢 Join Channel {idx}"
+        else:
+            label = "📢 Join Channel"
+        buttons.append([InlineKeyboardButton(label, url=link)])
+
     if len(message.command) > 1:
         buttons.append(
             [
@@ -515,19 +539,29 @@ async def clear_chats_command(client: Bot, message: Message):
     logger.info(f"Admin {admin_id} ({admin_name}) used /{cmd_name} command")
 
     session_data = get_session_user_messages()
-    targets = {uid: msgs for uid, msgs in session_data.items() if msgs}
+    targets = {uid: set(msgs) for uid, msgs in session_data.items() if msgs}
+    channel_msgs = set(get_session_channel_messages())
 
-    if not targets:
-        await message.reply_text("ℹ️ No session messages found with users to clear.", quote=True)
+    admin_chat_id = message.chat.id if message.chat else (message.from_user.id if message.from_user else None)
+    if admin_chat_id and admin_chat_id in targets:
+        targets[admin_chat_id].discard(message.id)
+
+    targets = {uid: msgs for uid, msgs in targets.items() if msgs}
+
+    if not targets and not channel_msgs:
+        await message.reply_text("ℹ️ No session messages found with users or in FORWARD_TO_CHANNEL to clear.", quote=True)
         return
 
-    total_msgs_count = sum(len(msgs) for msgs in targets.values())
+    total_msgs_count = sum(len(msgs) for msgs in targets.values()) + len(channel_msgs)
     status_msg = await message.reply_text(
-        f"<i>Clearing {total_msgs_count} messages across {len(targets)} user chat(s)...</i>",
+        f"<i>Clearing {total_msgs_count} session message(s) across user chat(s) and FORWARD_TO_CHANNEL...</i>",
         quote=True
     )
 
-    deleted_count = 0
+    if admin_chat_id and admin_chat_id in targets:
+        targets[admin_chat_id].discard(status_msg.id)
+
+    deleted_user_msgs = 0
     users_cleared = 0
 
     for u_id, msg_ids in targets.items():
@@ -553,17 +587,50 @@ async def clear_chats_command(client: Bot, message: Message):
                 logger.warning(f"Failed to delete session messages for user {u_id}: {e}")
 
         if user_deleted > 0:
-            deleted_count += user_deleted
+            deleted_user_msgs += user_deleted
             users_cleared += 1
 
     clear_session_user_messages()
-    logger.info(f"Admin {admin_id} ({admin_name}) cleared {deleted_count} messages across {users_cleared} user chat(s)")
 
-    await status_msg.edit_text(
+    deleted_channel_msgs = 0
+    if channel_msgs:
+        ch_msg_list = list(channel_msgs)
+        for i in range(0, len(ch_msg_list), 100):
+            chunk = ch_msg_list[i:i + 100]
+            try:
+                del_res = await client.delete_messages(chat_id=FORWARD_TO_CHANNEL, message_ids=chunk)
+                deleted_channel_msgs += len(chunk) if (del_res is None or isinstance(del_res, bool)) else (del_res if isinstance(del_res, int) and del_res > 0 else len(chunk))
+            except FloodWait as e:
+                wait_time = getattr(e, 'value', getattr(e, 'x', 1))
+                await asyncio.sleep(wait_time)
+                try:
+                    del_res = await client.delete_messages(chat_id=FORWARD_TO_CHANNEL, message_ids=chunk)
+                    deleted_channel_msgs += len(chunk) if (del_res is None or isinstance(del_res, bool)) else (del_res if isinstance(del_res, int) and del_res > 0 else len(chunk))
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.warning(f"Failed to delete session messages in FORWARD_TO_CHANNEL: {e}")
+
+        clear_session_channel_messages()
+
+    total_deleted = deleted_user_msgs + deleted_channel_msgs
+    logger.info(f"Admin {admin_id} ({admin_name}) cleared {deleted_user_msgs} user messages across {users_cleared} chats and {deleted_channel_msgs} messages in FORWARD_TO_CHANNEL")
+
+    result_text = (
         f"✅ <b>Chats cleared successfully!</b>\n\n"
         f"• <b>Users affected:</b> <code>{users_cleared}</code>\n"
-        f"• <b>Messages deleted:</b> <code>{deleted_count}</code>"
+        f"• <b>User messages deleted:</b> <code>{deleted_user_msgs}</code>\n"
+        f"• <b>Channel messages deleted:</b> <code>{deleted_channel_msgs}</code>\n"
+        f"• <b>Total deleted:</b> <code>{total_deleted}</code>"
     )
+    try:
+        await status_msg.edit_text(result_text)
+    except Exception:
+        if message.chat:
+            try:
+                await client.send_message(chat_id=message.chat.id, text=result_text)
+            except Exception:
+                pass
 
 @Bot.on_message(filters.command('ban') & filters.private & filters.user(ADMINS))
 async def ban_command(client: Bot, message: Message):

@@ -29,15 +29,23 @@ PORT = os.environ.get("PORT", "8080")
 DB_URI = os.environ.get("DATABASE_URL", "")
 DB_NAME = os.environ.get("DATABASE_NAME", "filesharexbot")
 
-#force sub channel id
-_raw_force_sub = os.environ.get("FORCE_SUB_CHANNEL", "0")
-_clean_force_sub = _raw_force_sub.strip() if _raw_force_sub else ""
+# Forward to channel id
+_raw_forward_to = os.environ.get("FORWARD_TO_CHANNEL", "").strip().strip('"').strip("'")
 try:
-    FORCE_SUB_CHANNEL = int(_clean_force_sub or "0")
+    FORWARD_TO_CHANNEL = int(_raw_forward_to)
+except (ValueError, TypeError):
+    raise Exception("FORWARD_TO_CHANNEL environment variable is mandatory and must be a valid integer.")
+
+# Force sub channel ids (space-separated integers)
+_raw_force_sub = os.environ.get("FORCE_SUB_CHANNEL", "").strip().strip('"').strip("'")
+try:
+    FORCE_SUB_CHANNEL = [int(x) for x in _raw_force_sub.split()]
 except ValueError:
-    raise Exception("FORCE_SUB_CHANNEL environment variable must be a valid integer.")
-if FORCE_SUB_CHANNEL == 0:
+    raise Exception("FORCE_SUB_CHANNEL environment variable must contain valid space-separated integers.")
+
+if not FORCE_SUB_CHANNEL:
     raise Exception("FORCE_SUB_CHANNEL environment variable is mandatory.")
+FORCE_SUB_CHANNELS = FORCE_SUB_CHANNEL
 JOIN_REQUEST_ENABLE = os.environ.get("JOIN_REQUEST_ENABLED", None)
 
 TG_BOT_WORKERS = int(os.environ.get("TG_BOT_WORKERS", "4"))

@@ -38,7 +38,11 @@
       "value": "-100"
     },
     "FORCE_SUB_CHANNEL":{
-      "description": "Mandatory ID of the channel or group for force sub feature (e.g. -100xxxxxxxxxx)",
+      "description": "Mandatory space-separated list of channel/group IDs for force sub feature (e.g. -1001111111111 -1002222222222)",
+      "value": ""
+    },
+    "FORWARD_TO_CHANNEL":{
+      "description": "Mandatory ID of the channel to where the files should be forwarded (e.g. -100xxxxxxxxxx)",
       "value": ""
     },
     "START_MESSAGE": {

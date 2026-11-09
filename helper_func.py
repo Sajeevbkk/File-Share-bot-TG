@@ -6,9 +6,25 @@ import asyncio
 import logging 
 from pyrogram import filters
 from pyrogram.enums import ChatMemberStatus
-from config import FORCE_SUB_CHANNEL, ADMINS, AUTO_DELETE_TIME, AUTO_DEL_SUCCESS_MSG
+from config import FORCE_SUB_CHANNEL, FORWARD_TO_CHANNEL, ADMINS, AUTO_DELETE_TIME, AUTO_DEL_SUCCESS_MSG
 from pyrogram.errors.exceptions.bad_request_400 import UserNotParticipant
 from pyrogram.errors import FloodWait
+
+async def get_unsubscribed_channels(client, user_id: int):
+    if not FORCE_SUB_CHANNEL:
+        return []
+    if user_id in ADMINS:
+        return []
+
+    unsubscribed = []
+    for ch_id in FORCE_SUB_CHANNEL:
+        try:
+            member = await client.get_chat_member(chat_id=ch_id, user_id=user_id)
+            if member.status not in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.MEMBER]:
+                unsubscribed.append(ch_id)
+        except (UserNotParticipant, Exception):
+            unsubscribed.append(ch_id)
+    return unsubscribed
 
 async def is_subscribed(filter, client, update):
     if not FORCE_SUB_CHANNEL:
@@ -18,15 +34,15 @@ async def is_subscribed(filter, client, update):
     user_id = update.from_user.id
     if user_id in ADMINS:
         return True
-    try:
-        member = await client.get_chat_member(chat_id = FORCE_SUB_CHANNEL, user_id = user_id)
-    except (UserNotParticipant, Exception):
-        return False
 
-    if not member.status in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.MEMBER]:
-        return False
-    else:
-        return True
+    for ch_id in FORCE_SUB_CHANNEL:
+        try:
+            member = await client.get_chat_member(chat_id=ch_id, user_id=user_id)
+            if member.status not in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.MEMBER]:
+                return False
+        except (UserNotParticipant, Exception):
+            return False
+    return True
 
 async def encode(string):
     string_bytes = string.encode("ascii")
@@ -176,21 +192,38 @@ def get_channel_post_link(chat_id, message_id: int, username: str = None) -> str
 
 # In-memory tracking of messages sent and received during the current bot session (user_id -> set of message_ids)
 SESSION_USER_MESSAGES = {}
+SESSION_CHANNEL_MESSAGES = set()
+
+def track_channel_message(message_id: int):
+    try:
+        if message_id:
+            SESSION_CHANNEL_MESSAGES.add(int(message_id))
+    except Exception:
+        pass
+
+def get_session_channel_messages():
+    return set(SESSION_CHANNEL_MESSAGES)
+
+def clear_session_channel_messages():
+    SESSION_CHANNEL_MESSAGES.clear()
 
 def track_session_message(chat_id: int, message_id: int):
     try:
         if not chat_id or not message_id:
             return
         chat_id = int(chat_id)
-        if chat_id > 0:
+        msg_id = int(message_id)
+        if chat_id == FORWARD_TO_CHANNEL:
+            SESSION_CHANNEL_MESSAGES.add(msg_id)
+        elif chat_id > 0:
             if chat_id not in SESSION_USER_MESSAGES:
                 SESSION_USER_MESSAGES[chat_id] = set()
-            SESSION_USER_MESSAGES[chat_id].add(int(message_id))
+            SESSION_USER_MESSAGES[chat_id].add(msg_id)
     except Exception:
         pass
 
 def get_session_user_messages():
-    return dict(SESSION_USER_MESSAGES)
+    return {uid: set(msgs) for uid, msgs in SESSION_USER_MESSAGES.items()}
 
 def clear_session_user_messages():
     SESSION_USER_MESSAGES.clear()

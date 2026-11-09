@@ -115,7 +115,8 @@ python3 main.py
 * `START_MESSAGE` Optional: start message of bot, use HTML and <a href='https://github.com/codexbotz/File-Sharing-Bot/blob/main/README.md#start_message'>fillings</a>
 * `START_PIC` Optional: URL or file path of the image to be sent as the start message
 * `FORCE_SUB_MESSAGE`Optional:Force sub message of bot, use HTML and Fillings
-* `FORCE_SUB_CHANNEL` Mandatory: ForceSub Channel ID (e.g. -100xxxxxxxxxx)
+* `FORCE_SUB_CHANNEL` Mandatory: Space-separated list of ForceSub Channel IDs (e.g. -100xxxxxxxxxx -100yyyyyyyyyy)
+* `FORWARD_TO_CHANNEL` Mandatory: Destination Channel ID where files should be forwarded (e.g. -100xxxxxxxxxx)
 * `PROTECT_CONTENT` Optional: True if you need to prevent files from forwarding
 * `AUTO_DELETE_TIME `  Set the time in seconds for automatic file deletion. Default is False, which disables auto-deletion.
 * `JOIN_REQUEST_ENABLED` Optional: Set to "True" to enable join request for the channel. Default is "False".
